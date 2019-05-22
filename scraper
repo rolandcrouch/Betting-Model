@@ -1,0 +1,132 @@
+# import libraries
+import urllib.request as u
+from bs4 import BeautifulSoup as Soup
+
+import os
+import csv
+import itertools
+import requests
+from datetime import date, timedelta
+
+
+#proxies={"http":"uk-webproxy.edmz.tesco.org:80","https":"uk-webproxy.edmz.tesco.org:80"}
+#specify url
+#quote_page = 'http://www.espn.co.uk/rugby/scoreboard?date=20190407'
+
+espn_url_format = "http://www.espn.co.uk/rugby/scoreboard?date={}" #20190406
+
+def get_web_text(date_id):
+    """
+
+    :param date_id: Like 20190407
+    :return: text of file
+    """
+
+    filename = "espn_rugby_{}.html".format(date_id)
+    if os.path.exists(filename):
+        return open(filename).read()
+    else:
+        return None
+
+def get_team_data(soup):
+    data = []
+    home_team_boxes = soup.findAll('div', attrs={'class': 'team team-a possession'})
+    away_team_boxes = soup.findAll('div', attrs={'class': 'team team-b possession'})
+
+    for i in range(len(home_team_boxes)):
+        item = {}
+        home_team_tag = home_team_boxes[i]
+        away_team_tag = away_team_boxes[i]
+        item["home_team"] = home_team_tag.find('span', attrs={"class", "short-name"}).text
+        item["away_team"] = away_team_tag.find('span', attrs={"class", "short-name"}).text
+        item["home_score"] = home_team_tag.find('div', attrs={"class", "score icon-font-after"}).text
+        item["away_score"] = away_team_tag.find('div', attrs={"class", "score icon-font-before"}).text
+        data.append(item)
+
+    return data
+
+def get_match_data(check_date, page_html):
+    data = []
+    soup = Soup(page_html, 'html.parser')
+    tournament_boxes = soup.findAll('div', attrs={'id':'events'})[0].children
+
+    for tournament_tag in tournament_boxes:
+        if tournament_tag.name == 'div':
+
+            home_team_boxes = tournament_tag.findAll('div', attrs={'class':'team team-a possession'})
+            away_team_boxes = tournament_tag.findAll('div', attrs={'class':'team team-b possession'})
+            away_tries_scored = tournament_tag.findAll('div', attrs={"class":"team away"})
+            home_tries_scored = tournament_tag.findAll('div', attrs={"class":"team home"})
+            for i in range(len(home_tries_scored)):
+
+                    item = {}
+                    home_team_tag = home_team_boxes[i]
+                    away_team_tag = away_team_boxes[i]
+                    home_tries_tag = home_tries_scored[i]
+                    away_tries_tag = away_tries_scored[i]
+
+                    item["match_date"] = check_date
+                    item["tournament"] = tournament_tag.find('h2', attrs={"class","date-heading js-show"}).text
+                    item["home_team"] = home_team_tag.find('span', attrs={"class","short-name"}).text
+                    item["away_team"] = away_team_tag.find('span', attrs={"class","short-name"}).text
+                    item["home_score"] = home_team_tag.find('div', attrs={"class","score icon-font-after"}).text
+                    item["away_score"] = away_team_tag.find('div', attrs={"class","score icon-font-before"}).text
+                    home_scorers = home_tries_tag.find('ul', attrs={
+                        "class": "goal icon-font-before icon-rugby-solid-before icon-rugby-solid"})
+                    if not home_scorers:
+                        item["home_tries"] = 0
+                    else:
+                        item["home_tries"] = len(list(home_scorers))
+
+                    away_scorers = away_tries_tag.find('ul', attrs={"class": "goal icon-font-before icon-rugby-solid-before icon-rugby-solid"})
+                    if not away_scorers:
+                        item["away_tries"] = 0
+                    else:
+                        item["away_tries"] = len(list(away_scorers))
+                    data.append(item)
+    return data
+
+
+
+def main():
+    import time
+    import pandas as pd
+    headers = {"User-Agent": "python-requests/1.2.0"}
+   # proxies = {"http": "uk-webproxy.edmz.tesco.org:80", "https": "uk-webproxy.edmz.tesco.org:80"}
+    full_results = []
+    date1 = date(2014, 8, 1)  # start date
+    date2 = date(2019, 4, 30)  # end date
+
+    delta = date2 - date1  # timedelta get us the date difference
+    dates = [date1 + timedelta(i) for i in range(delta.days + 1)]  # <- This is a list comprehension
+
+    with requests.Session() as session:
+        session.headers = headers
+        #session.proxies = proxies
+    for _date in dates:
+        str_date = _date.isoformat().replace("-", "")
+
+        resp = session.get(espn_url_format.format(str_date))  # = get_web_text(str_date)  # response.text
+        if resp.status_code == 200:
+            day_results = get_match_data(str_date, resp.text)
+            if day_results:
+                full_results.extend(day_results)
+        time.sleep(2)
+
+    csv_headers = ['match_date', 'tournament', 'home_team', 'away_team', 'home_score', 'away_score', 'home_tries', 'away_tries']
+    df = pd.DataFrame.from_records(full_results, columns=csv_headers)
+
+    #df.drop(inplace=True)
+    df.to_csv("espn_results_{}_to_{}.csv".format(date1.isoformat(), date2.isoformat()), index=False, columns=csv_headers)
+    """
+    if html_doc:
+        soup = BeautifulSoup(html_doc, 'html.parser')
+        team_data = get_match_data(soup)
+    """
+
+
+
+
+if __name__ == '__main__':
+    os.chdir(r'C:\Users\vd35\OneDrive - Tesco\Documents\ESPN')
+    main()
